@@ -37,6 +37,7 @@ let arrow   : forall 'm. monad 'm => parser_t 'm () = try @@ void @@ lexeme (sym
 let darrow  : forall 'm. monad 'm => parser_t 'm () = try @@ void @@ lexeme (symbol "=>")
 let equals  : forall 'm. monad 'm => parser_t 'm () = try @@ void @@ lexeme (symbol "=")
 let pipe    : forall 'm. monad 'm => parser_t 'm () = try @@ void @@ lexeme (symbol "|")
+let dcolon  : forall 'm. monad 'm => parser_t 'm () = try @@ void @@ lexeme (symbol "::")
 
 let small : forall 'm. monad 'm => parser_t 'm string =
   try (satisfy (fun c -> "a" <= c && c <= "z") <|> symbol "_") <?> "small letter"
@@ -63,6 +64,7 @@ let iskw = function
   | "module"
   | "newtype"
   | "of"
+  | "foreign"
   | "then"
   | "type"
   | "where"
@@ -127,7 +129,21 @@ let integer : forall 'm. monad 'm => parser_t 'm int =
     let! c = hexit
     let! cs = many_fold (^) "" hexit
     pure ("0x" ^ c ^ cs)
-  let! c = (try hexadecimal <|> decimal) <?> "hex or decimal integer"
+  let! c = (lexeme (try hexadecimal <|> decimal)) <?> "hex or decimal integer"
   match parse_int c with
   | None -> error "no parse"
   | Some x -> pure x
+
+let string : forall 'm. monad 'm => parser_t 'm string =
+  flip (<?>) "string literal" # lexeme @@
+    let parse_escape = function
+      | "n" -> pure "\n"
+      | "t" -> pure "\t"
+      | "\"" -> pure "\""
+      | a -> unexpected ("escape sequence " ^ a)
+    let str_ent =
+      satisfy (fun p -> p <> "\"" && p <> "\\")
+        <|> ( let! _ = try (symbol "\\")
+              let! e = char
+              parse_escape e)
+    symbol "\"" *> many_fold (^) "" str_ent <* symbol "\""

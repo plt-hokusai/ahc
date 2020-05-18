@@ -4,6 +4,10 @@ open import "./parser.ml"
 open import "prelude.ml"
 open import "lua/io.ml"
 
+let printerror (e, { line, col }) =
+  put_line @@ "line " ^ show line ^ ", col " ^ show col ^ ":"
+  print e
+
 let go infile outfile =
   let infile = open_for_reading infile
   let outfile = open_file outfile Write_m
@@ -16,7 +20,7 @@ let go infile outfile =
         |> C.program
         |> A.assm_program
         |> write_bytes outfile
-    | Left e -> print e
+    | Left e -> printerror e
   | _ -> ()
   close_file infile
   close_file outfile
@@ -29,7 +33,7 @@ let test str =
         |> C.program
         |> A.assm_program
         |> put_line
-  | Left e -> print e
+  | Left e -> printerror e
 
 let test_file infile =
   let infile = open_for_reading infile

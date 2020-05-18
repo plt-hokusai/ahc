@@ -3,10 +3,11 @@ module S = import "data/set.ml"
 module M = import "data/map.ml"
 
 type expr =
-  | Ref of string
-  | App of expr * expr
-  | Lam of string * expr
+  | Ref  of string
+  | App  of expr * expr
+  | Lam  of string * expr
   | Case of expr * list (string * expr)
+  | Lit  of int
 
 let app = curry App
 let lam = curry Lam
@@ -20,6 +21,7 @@ let rec free_vars = function
         |> map (fun (_, e) -> free_vars e)
         |> foldl S.union S.empty
         |> S.union (free_vars e)
+  | Lit _ -> S.empty
 
 let rec subst m = function
   | Ref v ->
@@ -29,17 +31,35 @@ let rec subst m = function
   | App (f, x) -> App (subst m f, subst m x)
   | Lam (v, x) -> Lam (v, subst (M.delete v m) x)
   | Case (e, xs) -> Case (subst m e, map (second (subst m)) xs)
+  | Lit x -> Lit x
 
 type hstype =
   | Tycon of string
   | Tyvar of string
   | Tyapp of hstype * hstype
+  | Tyarr of hstype * hstype
+  | Tytup of list hstype
+
+let rec arity = function
+  | Tyarr (_, i) -> 1 + arity i
+  | _ -> 0
 
 type constr = Constr of string * list hstype
+
+type call_conv = Lua | Prim
+
+type fdecl =
+  Fimport of {
+    cc : call_conv,
+    fent : string,
+    ftype : hstype,
+    var : string
+  }
 
 type decl =
   | Decl of string * list string * expr
   | Data of string * list string * list constr
+  | Foreign of fdecl
 
 type prog <- list decl
 
@@ -67,3 +87,4 @@ let ds_prog prog =
   match c with
   | Data c -> ds_data c
   | Decl (n, args, e) -> [Decl (n, args, e)]
+  | Foreign d -> [Foreign d]

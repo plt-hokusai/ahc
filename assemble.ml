@@ -1,21 +1,45 @@
 include import "./compile.ml"
+module Strings = import "./lib/strings.ml"
 open import "prelude.ml"
 open import "lua/io.ml"
+open import "./lang.ml"
 
 let resolve_addr = function
   | Combinator n -> n ^ "_combinator"
   | Arg i -> "stack[sp - " ^ show (i + 1) ^ "][3]"
+  | Int i -> show i
 
-let gm2lua = function
-  | Push addr -> "  stack[sp + 1] = " ^ resolve_addr addr ^ "; sp = sp + 1"
-  | Pop n -> "  sp = sp - " ^ show n
-  | Update n -> "  stack[sp - " ^ show (n + 1) ^ "] = { I, stack[sp] }; sp = sp - 1"
-  | Mkap -> "  stack[sp - 1] = { A, stack[sp - 1], stack[sp] }; sp = sp - 1"
-  | Unwind -> "  return unwind()"
+let rec gm2lua = function
+  | Push addr ->
+      "  stack[sp + 1] = " ^ resolve_addr addr ^ "; sp = sp + 1"
+  | Pop n ->
+      "  sp = sp - " ^ show n
+  | Update n ->
+      "  stack[sp - " ^ show (n + 1) ^ "] = { I, stack[sp] }; sp = sp - 1"
+  | Mkap ->
+      "  stack[sp - 1] = { A, stack[sp - 1], stack[sp] }; sp = sp - 1"
+  | Unwind ->
+      "  return unwind(stack, sp)"
+  | Eval -> "  stack[sp] = eval(stack[sp])"
+  | Add -> "  stack[sp - 1] = stack[sp - 1] + stack[sp]; sp = sp - 1"
+  | Sub -> "  stack[sp - 1] = stack[sp - 1] - stack[sp]; sp = sp - 1"
+  | Div -> "  stack[sp - 1] = stack[sp - 1] / stack[sp]; sp = sp - 1"
+  | Mul -> "  stack[sp - 1] = stack[sp - 1] * stack[sp]; sp = sp - 1"
+  | Iszero (yes, no) ->
+      "  if stack[sp] == 0 then\n"
+        ^ foldl (fun x i -> x ^ "  " ^ gm2lua i) "" yes ^ "\n"
+        ^ "  else\n"
+        ^ foldl (fun x i -> x ^ "  " ^ gm2lua i) "" no ^ "\n"
+        ^ "  end"
 
 let compute_local_set xs =
   let rec go i (s : S.t string) = function
-    | Cons ((name, _, _), xs) ->
+    | Cons (Fd (Fimport {var}), xs) ->
+      if i >= 100 then
+        s
+      else
+        go (i + 2) (S.insert (var ^ "_wrapper") (S.insert (var ^ "_combinator") s)) xs
+    | Cons (Sc (name, _), xs) ->
       if i >= 100 then
         s
       else
@@ -26,11 +50,51 @@ let compute_local_set xs =
 let sc2lua (name, arity, body) =
   let body =
     body
-      |> foldl (fun x s -> x ^ gm2lua s ^ ";\n") (name ^ " = function()\n")
+      |> foldl (fun x s -> x ^ gm2lua s ^ ";\n") (name ^ " = function(stack, sp)\n")
       |> (^ "end")
   let dec =
     name ^ "_combinator = { F, " ^ name ^ ", " ^ show arity ^ ", " ^ show name ^ " };"
   body ^ "\n" ^ dec
+
+let foreign2lua (Fimport { cc, fent = fspec, var, ftype }) =
+  let (file, fspec) =
+    match Strings.split_on " " fspec with
+    | [file, func] -> (Some file, func)
+    | [func] -> (None, func)
+    | _ -> error @@ "Foreign spec too big: " ^ fspec
+  match cc with
+  | Prim -> error "primitive definitions are in Gmcode"
+  | Lua ->
+    let arity = arity ftype
+    let args = map (fun i -> ("a" ^ show i, i)) [1..arity]
+    let fcall =
+      if arity == 0 then
+        fspec
+      else
+        let Cons ((a, _), args) = args
+        fspec ^ "(" ^ foldl (fun a (i, _) -> a ^ ", " ^ i) a args ^ ")"
+    let wrapper =
+      "local function " ^ var ^ "_wrapper(stack, sp)\n"
+      ^ foldl (fun x (a, i) -> x ^ "  local " ^ a ^ " = stack[sp - " ^ show i ^ "][3];\n") "" args
+      ^ "  stack[sp - " ^ show arity ^ "] = " ^ fcall ^ "\n"
+      ^ "  return unwind(stack, sp - " ^ show arity ^ ")\nend"
+    let dec =
+      var ^ "_combinator = { F, " ^ var ^ "_wrapper, " ^ show arity ^ ", '" ^ fspec ^ "' };"
+    let contents =
+      match file with
+      | Some path -> 
+        let f = open_for_reading path
+        let x = read_all f
+        close_file f
+        match x with
+        | Some s -> "--- " ^ path ^ "\n" ^ s ^ "\n"
+        | None -> ""
+      | None -> ""
+    contents ^ wrapper ^ "\n" ^ dec
+
+let codegen = function
+  | Sc t -> sc2lua t
+  | Fd i -> foreign2lua i
 
 let preamble =
   let f = open_for_reading "preamble.lua"
@@ -48,5 +112,5 @@ let assm_program decs =
       compute_local_set decs |> S.members
     let local_decs =
       foldl (fun x v -> x ^ ", " ^ v) ("local " ^ local1) locals
-    let body = foldl (fun x s -> x ^ sc2lua s ^ "\n") "" decs
-    preamble ^ local_decs ^ "\n" ^ body ^ "stack[sp] = { A, main_combinator, 0 }; unwind()"
+    let body = foldl (fun x s -> x ^ codegen s ^ "\n") "" decs
+    preamble ^ local_decs ^ "\n" ^ body ^ "unwind({{ A, main_combinator, 123 }}, 1)"

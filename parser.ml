@@ -8,7 +8,8 @@ let laid_out_block p = between obrace cbrace (sep_end_by_1 semi p)
 
 let rec atom : forall 'm. monad 'm => parser_t 'm expr =
   map Ref (try varid)
-    <+> map Ref (try conid)
+    <|> map Ref (try conid)
+    <|> map Lit (try integer)
     <+> between (try oparen) cparen expr
 and fexp : forall 'm. monad 'm => parser_t 'm expr =
   let! a = atom
@@ -39,14 +40,18 @@ and expr : forall 'm. monad 'm => parser_t 'm expr =
 let rec ty_atom : forall 'm. monad 'm => parser_t 'm hstype =
   map Tyvar (try varid)
     <|> map Tycon (try conid)
-    <+> between (try oparen) cparen ty_exp
-and ty_exp : forall 'm. monad 'm => parser_t 'm hstype =
+    <+> between (try oparen) cparen ty_tup
+and ty_fexp : forall 'm. monad 'm => parser_t 'm hstype =
   let! a = ty_atom
   let! ats = many ty_atom
   pure (foldl (curry Tyapp) a ats)
+and ty_exp : forall 'm. monad 'm => parser_t 'm hstype =
+  chainr1 ty_fexp (map (const (curry Tyarr)) arrow)
+and ty_tup : forall 'm. monad 'm => parser_t 'm hstype =
+  Tytup <$> sep_by comma ty_exp
 
 let datadec : forall 'm. monad 'm => parser_t 'm decl =
-  let! _ = keyword "data"
+  let! _ = try (keyword "data")
   let datacon =
     let! nm = conid
     let! args = many ty_atom
@@ -57,13 +62,29 @@ let datadec : forall 'm. monad 'm => parser_t 'm decl =
   let! c = sep_by_1 pipe (try datacon)
   pure (Data (nm, args, c))
 
+let fdecl : forall 'm. monad 'm => parser_t 'm fdecl =
+  let! _ = try (keyword "import")
+  let! cc =
+      ( (Lua <$ try (keyword "lua"))
+    <|> (Prim <$ try (keyword "prim"))
+      )
+  let! fent = string
+  let! var = varid
+  let! _ = dcolon
+  let! ftype = ty_exp
+  pure (Fimport { cc, fent, var, ftype })
+
+let func : forall 'm. monad 'm => parser_t 'm decl =
+  let! nm = varid
+  let! args = many (try varid)
+  let! _ = equals
+  map (fun e -> Decl (nm, args, e)) expr
+
 let dec : forall 'm. monad 'm => parser_t 'm decl =
-  let func =
-    let! nm = varid
-    let! args = many (try varid)
-    let! _ = equals
-    map (fun e -> Decl (nm, args, e)) expr
-  try datadec <|> func
+  let foreign =
+    let! _ = try (keyword "foreign")
+    map Foreign fdecl
+  try datadec <|> try foreign <|> func
 
 let prog : forall 'm. monad 'm => parser_t 'm prog =
   sep_end_by_1 semi dec <* eof

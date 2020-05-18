@@ -13,56 +13,59 @@ instance show error begin
         ^ "Expecting one of " ^ foldl (^) "" ms
 end
 
+private type pos <- { line : int, col : int }
+
 private type result 'a =
-  | Ok  of consumed * 'a    * string
-  | Err of consumed * error * string
+  | Ok  of consumed * 'a    * string * pos
+  | Err of consumed * error * string * pos
 
 let join_consumed x y =
   match x with
   | C -> C
   | E -> y
 
-type parser_t 'm 'a = private P of string -> 'm (result 'a)
+type parser_t 'm 'a = private P of pos -> string -> 'm (result 'a)
 type parser <- parser_t identity
 
 instance functor 'm => functor (parser_t 'm) begin
-  let f <$> P x = P @@ fun i ->
-    flip map (x i) @@ fun p ->
+  let f <$> P x = P @@ fun pos i ->
+    flip map (x pos i) @@ fun p ->
     match p with
     | Ok (c, x, i) -> Ok (c, f x, i)
     | Err e -> Err e
 end
 
 instance monad 'm => applicative (parser_t 'm) begin
-  let pure x = P (fun s -> pure (Ok (E, x, s)))
-  let P f <*> P x = P @@ fun s ->
-    let! f = f s
+  let pure x = P (fun p s -> pure (Ok (E, x, s, p)))
+  let P f <*> P x = P @@ fun p s ->
+    let! f = f p s
     match f with
-    | Ok (c, f, s) ->
-      let! x = x s
+    | Ok (c, f, s, p) ->
+      let! x = x p s
       match x with
-      | Ok (c', x, s) -> pure @@ Ok (join_consumed c c', f x, s)
+      | Ok (c', x, s, p) -> pure @@ Ok (join_consumed c c', f x, s, p)
       | Err (c', p) -> pure @@ Err (join_consumed c c', p)
     | Err e -> pure @@ Err e
 end
 
 let x *> y = (fun _ x -> x) <$> x <*> y
 let x <* y = (| const x y |)
+let x <$ a = map (const x) a
 
 instance monad 'm => monad (parser_t 'm) begin
-  let P x >>= f = P @@ fun s ->
-    let! x = x s
+  let P x >>= f = P @@ fun p s ->
+    let! x = x p s
     match x with
-    | Ok (c, x, s) ->
+    | Ok (c, x, s, p) ->
       let P kont = f x
-      let! x = kont s
+      let! x = kont p s
       match x with
       | Ok (c', x, s) -> pure @@ Ok (join_consumed c c', x, s)
       | Err (c', p) -> pure @@ Err (join_consumed c c', p)
     | Err e -> pure @@ Err e
 end
 
-let private fail e = P (fun s -> pure (Err (E, e, s)))
+let private fail e = P (fun p s -> pure (Err (E, e, s, p)))
 
 let empty : forall 'm 'a. monad 'm => parser_t 'm 'a =
   fail (Unexpected ("empty parse", []))
@@ -73,23 +76,23 @@ let unexpected e =
 let alt_err (Unexpected (u, xs)) (Unexpected (_, ys)) =
   Unexpected (u, xs ++ ys)
 
-let P x <|> P y = P @@ fun s ->
-  let! x = x s
+let P x <|> P y = P @@ fun p s ->
+  let! x = x p s
   match x with
   | Ok x -> pure (Ok x)
-  | Err (c, m, s) ->
-    let! y = y s
+  | Err (c, m, s, p) ->
+    let! y = y p s
     match y with
     | Ok (c', x, s) -> pure (Ok (join_consumed c c', x, s))
     | Err (c', m', s) -> pure (Err (join_consumed c c', alt_err m m', s))
 
-let P x <+> y = P @@ fun s ->
-  let! x = x s
+let P x <+> y = P @@ fun p s ->
+  let! x = x p s
   match x with
   | Ok x -> pure (Ok x)
-  | Err (c, m, s) ->
+  | Err (c, m, s, p) ->
     let P y = force y
-    let! y = y s
+    let! y = y p s
     match y with
     | Ok (c', x, s) -> pure (Ok (join_consumed c c', x, s))
     | Err (c', m', s) -> pure (Err (join_consumed c c', alt_err m m', s))
@@ -97,51 +100,61 @@ let P x <+> y = P @@ fun s ->
 private module S = import "lua/string.ml"
 
 let char : forall 'm. applicative 'm => parser_t 'm string =
-  P @@ fun s ->
+  P @@ fun p s ->
     let x = S.substring s 1 1
     if x <> "" then
       let r = S.substring s 2 (S.length s)
-      pure @@ Ok (C, x, r)
+      if x == "\n" then
+        pure @@ Ok (C, x, r, { line = p.line + 1, col = 0 })
+      else
+        pure @@ Ok (C, x, r, { line = p.line, col = p.col + 1 })
     else
-      pure @@ Err (E, Unexpected ("end-of-file", ["character"]), s)
+      pure @@ Err (E, Unexpected ("end-of-file", ["character"]), s, p)
 
 let eof : forall 'm. applicative 'm => parser_t 'm () =
-  P @@ fun s ->
+  P @@ fun p s ->
     if s == "" then
-      pure @@ Ok (E, (), s)
+      pure @@ Ok (E, (), s, p)
     else
-      pure @@ Err (E, Unexpected (S.substring s 1 1, ["end-of-file"]), s)
+      pure @@
+        Err (E, Unexpected (S.substring s 1 1, ["end-of-file"]), s, p)
 
-let satisfy p = P @@ fun s ->
-  let x = S.substring s 1 1
-  if x <> "" && p x then
-    pure @@ Ok (C, x, S.substring s 2 (S.length s))
-  else
-    let m =
-      if x == "" then
-        "end of file"
-      else x
-    pure @@ Err (E, Unexpected (m, ["character"]), s)
+let satisfy pred =
+  P @@ fun p s ->
+    let x = S.substring s 1 1
+    if x <> "" && pred x then
+      let r = S.substring s 2 (S.length s)
+      if x == "\n" then
+        pure @@ Ok (C, x, r, { line = p.line + 1, col = 0 })
+      else
+        pure @@ Ok (C, x, r, { line = p.line, col = p.col + 1 })
+    else
+      let m =
+        if x == "" then
+          "end of file"
+        else
+          x
+      pure @@ Err (E, Unexpected (m, ["character"]), s, p)
 
-let P k <?> m = P @@ fun s ->
-  let! x = k s
+let P k <?> m = P @@ fun p s ->
+  let! x = k p s
   match x with
   | Ok e -> pure (Ok e)
   | Err (c, Unexpected (u, _), s) -> pure (Err (c, Unexpected (u, [m]), s))
 
 let many_fold k z (P x) =
-  let rec go consumed kont s =
-    let! x = x s
+  let rec go consumed kont pos s =
+    let! x = x pos s
     match x with
-    | Err ((c, _, s) as p) ->
+    | Err ((c, _, s, pos) as p) ->
       match c with
       | C -> pure (Err p)
-      | E -> kont consumed z s
-    | Ok (c, x, s) ->
+      | E -> kont consumed z pos s
+    | Ok (c, x, s, pos) ->
       match c with
       | E -> error @@ "many: got parser that accepts the empty string"
-      | C -> go C (fun c -> kont c # k x) s
-  P (go E (fun c z s -> pure (Ok (c, z, s))))
+      | C -> go C (fun c -> kont c # k x) pos s
+  P (go E (fun c z pos s -> pure (Ok (c, z, s, pos))))
 
 let many p = many_fold (::) [] p
 let some p =
@@ -191,11 +204,11 @@ let between o c p =
   let! _ = c
   pure x
 
-let try (P x) = P @@ fun s ->
-  let! x = x s
+let try (P x) = P @@ fun pos s ->
+  let! x = x pos s
   match x with
   | Ok c -> pure (Ok c)
-  | Err (_, p, _) -> pure (Err (E, p, s))
+  | Err (_, p, _) -> pure (Err (E, p, s, pos))
 
 let optionally p = map Some (try p) <|> pure None
 
@@ -209,24 +222,35 @@ let rec sep_end_by_1 sep p =
 and sep_end_by sep p =
   sep_end_by_1 sep p <|> pure []
 
+let chainr1 p op =
+  let rec scan =
+    let! x = p
+    rest x
+  and rest x =
+    ( let! f = op
+      let! y = scan
+      pure (f x y)
+    ) <|> pure x
+  let _ = rest (* shut up, amc *)
+  scan
 
 let parse (P x) s =
-  let! x = x s
+  let! x = x { line = 0, col = 0 } s
   match x with
   | Ok (_, x, r) -> pure @@ Right (x, r)
-  | Err (_, m, _) -> pure @@ Left m
+  | Err (_, m, _, p) -> pure @@ Left (m, p)
 
 let run_parser p s =
   let Id x = parse p s
   x
 
 let run_parser' (P x) s =
-  let Id x = x s
+  let Id x = x { line = 0, col = 0 } s
   x
 
-let lift m = P @@ fun s ->
+let lift m = P @@ fun pos s ->
   let! x = m
-  pure @@ Ok (E, x, s)
+  pure @@ Ok (E, x, s, pos)
 
 let morph (k : forall 'a. 'm 'a -> 'n 'a) (P x) = P @@ fun s -> k (x s)
 let void x = map (const ()) x

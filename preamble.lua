@@ -16,6 +16,7 @@ local function unwind(stack, sp)
         error("insufficient arguments for supercombinator " .. x[4])
       end
     end
+    return x
   else
     return x, stack, sp
   end
@@ -24,21 +25,26 @@ end
 local function repr(x)
   if type(x) == 'table' then
     if x[1] == A then
-      return repr(x[2]) .. '(' .. repr(x[3])
+      return repr(x[2]) .. '(' .. repr(x[3]) .. ')'
     elseif x[1] == F then
       return x[4]
     elseif x[1] == I then
       return '&' .. repr(x[2])
     end
-    return '<bad node>'
+    local r = {}
+    for k, v in pairs(x) do
+      r[k] = repr(v)
+    end
+    return '{' .. table.concat(r, ', ') .. '}'
   else
     return tostring(x)
   end
 end
 
-local function eval(node)
-  local stack, sp = { node }, 1
-  return (unwind(stack, sp))
+local function eval(stack, sp)
+  local nf = (unwind({ stack[sp] }, 1))
+  stack[sp] = { I, nf }
+  return nf
 end
 
 local function getchar(stack, sp)

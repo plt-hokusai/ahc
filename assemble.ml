@@ -7,6 +7,7 @@ open import "./lang.ml"
 let resolve_addr = function
   | Combinator n -> n ^ "_combinator"
   | Arg i -> "stack[sp - " ^ show (i + 1) ^ "][3]"
+  | Local i -> "stack[sp - " ^ show i ^ "]"
   | Int i -> show i
 
 let rec gm2lua = function
@@ -15,22 +16,61 @@ let rec gm2lua = function
   | Pop n ->
       "  sp = sp - " ^ show n
   | Update n ->
-      "  stack[sp - " ^ show (n + 1) ^ "] = { I, stack[sp] }; sp = sp - 1"
+      let it = "stack[sp - " ^ show (n + 1) ^ "]"
+      "  if type(" ^ it ^ ") == 'table' then\n"
+        ^ "    " ^ it ^ "[1] = I; " ^ it ^ "[2] = stack[sp]\n"
+        ^ "  else " ^ it ^ " = stack[sp] end\n"
+        ^ "  sp = sp - 1"
   | Mkap ->
       "  stack[sp - 1] = { A, stack[sp - 1], stack[sp] }; sp = sp - 1"
   | Unwind ->
       "  return unwind(stack, sp)"
-  | Eval -> "  stack[sp] = eval(stack[sp])"
+  | Eval -> "  stack[sp] = eval(stack, sp)"
   | Add -> "  stack[sp - 1] = stack[sp - 1] + stack[sp]; sp = sp - 1"
   | Sub -> "  stack[sp - 1] = stack[sp - 1] - stack[sp]; sp = sp - 1"
   | Div -> "  stack[sp - 1] = stack[sp - 1] / stack[sp]; sp = sp - 1"
   | Mul -> "  stack[sp - 1] = stack[sp - 1] * stack[sp]; sp = sp - 1"
+  | Alloc lim ->
+      let rec go acc n =
+        if n > 0 then
+          go (acc ^ ";\n  stack[sp + " ^ show n ^ "] = {}") (n - 1)
+        else
+          acc ^ ";  sp = sp + " ^ show lim
+      go "--" lim
+  | Slide n ->
+      "  stack[sp - " ^ show n ^ "] = stack[sp]; sp = sp - " ^ show n
   | Iszero (yes, no) ->
       "  if stack[sp] == 0 then\n"
-        ^ foldl (fun x i -> x ^ "  " ^ gm2lua i) "" yes ^ "\n"
+        ^ foldl (fun x i -> x ^ "  " ^ gm2lua i ^ ";\n") "" yes
         ^ "  else\n"
-        ^ foldl (fun x i -> x ^ "  " ^ gm2lua i) "" no ^ "\n"
+        ^ foldl (fun x i -> x ^ "  " ^ gm2lua i ^ ";\n") "" no
         ^ "  end"
+  | Pack (arity, tag) ->
+      let rec go acc i =
+        if i > 0 then
+          go (acc ^ ", stack[sp - " ^ show (i - 1) ^ "]") (i - 1)
+        else
+          acc
+      let values = go "" arity
+      " stack[sp + 1] = {" ^ show tag ^ values ^ "}; sp = sp + 1"
+  | Casejump alts ->
+      let rec go con = function
+        | [] -> " error('unmatched case')"
+        | Cons ((arity, code : list _), alts) ->
+          (* Where is the constructor? stack[sp], then it moves to
+           * stack[sp - 1]. Generally: stack[sp - i], 0 <= i < arity *)
+          let rec go_arg i =
+            if i < arity then
+              "    stack[sp + 1] = stack[sp - " ^ show i ^ "][" ^ show (i + 2) ^ "]; sp = sp + 1;\n"
+                ^ go_arg (i + 1)
+            else
+              foldl (fun x i -> x ^ "  " ^ gm2lua i ^ ";\n") "" code
+          "  if stack[sp][1] == " ^ show con ^ " then\n"
+            ^ go_arg 0
+            ^ "  else"
+            ^ go (con + 1) alts
+            ^ "  end"
+      go 0 alts
 
 let compute_local_set xs =
   let rec go i (s : S.t string) = function
@@ -50,7 +90,7 @@ let compute_local_set xs =
 let sc2lua (name, arity, body) =
   let body =
     body
-      |> foldl (fun x s -> x ^ gm2lua s ^ ";\n") (name ^ " = function(stack, sp)\n")
+      |> foldl (fun x s -> x ^ "-- " ^ show s ^ "\n" ^ gm2lua s ^ ";\n") (name ^ " = function(stack, sp)\n")
       |> (^ "end")
   let dec =
     name ^ "_combinator = { F, " ^ name ^ ", " ^ show arity ^ ", " ^ show name ^ " };"

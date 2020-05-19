@@ -32,10 +32,22 @@ and expr : forall 'm. monad 'm => parser_t 'm expr =
         let! vs = many (try varid)
         let! _ = arrow
         let! e = expr
-        pure (c, foldr ((Lam #) # curry id) e vs)
+        pure (c, vs, e)
       )
     pure (Case (e, arms))
-  try lam <|> try case <+> fexp
+  let hslet =
+    let binding =
+      let! c = varid
+      let! vs = many (try varid)
+      let! _ = equals
+      let! e = expr
+      pure (c, foldr ((Lam #) # curry id) e vs)
+    let! _ = keyword "let"
+    let! bs = laid_out_block binding
+    let! _ = keyword "in"
+    let! b = expr
+    pure (Let (bs, b))
+  try lam <|> try case <|> try hslet <+> fexp
 
 let rec ty_atom : forall 'm. monad 'm => parser_t 'm hstype =
   map Tyvar (try varid)

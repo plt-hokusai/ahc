@@ -4,6 +4,8 @@ open import "./parser.ml"
 open import "prelude.ml"
 open import "lua/io.ml"
 
+external val dofile : string -> () = "dofile"
+
 let printerror (e, { line, col }) =
   put_line @@ "line " ^ show line ^ ", col " ^ show col ^ ":"
   print e
@@ -16,7 +18,6 @@ let go infile outfile =
     match lex prog str with
     | Right (ds, _) ->
       ds
-        |> ds_prog
         |> C.program
         |> A.assm_program
         |> write_bytes outfile
@@ -25,14 +26,17 @@ let go infile outfile =
   close_file infile
   close_file outfile
 
+let go' infile outfile =
+  go infile outfile
+  dofile outfile
+
 let test str =
   match lex prog str with
   | Right (ds, _) ->
-      ds
-        |> ds_prog
-        |> C.program
-        |> A.assm_program
-        |> put_line
+      let code = ds |> C.program
+      let lua = code |> A.assm_program
+      print code
+      put_line lua
   | Left e -> printerror e
 
 let test_file infile =

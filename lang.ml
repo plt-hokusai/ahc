@@ -6,8 +6,9 @@ type expr =
   | Ref  of string
   | App  of expr * expr
   | Lam  of string * expr
-  | Case of expr * list (string * expr)
+  | Case of expr * list (string * list string * expr)
   | Lit  of int
+  | Let  of list (string * expr) * expr
 
 let app = curry App
 let lam = curry Lam
@@ -18,20 +19,17 @@ let rec free_vars = function
   | Lam (v, x) -> v `S.delete` free_vars x
   | Case (e, bs) ->
       bs
-        |> map (fun (_, e) -> free_vars e)
+        |> map (fun (_, a, e) -> free_vars e `S.difference` S.from_list a)
         |> foldl S.union S.empty
         |> S.union (free_vars e)
+  | Let (vs, b) ->
+      let bound = S.from_list (map (fun (x, _) -> x) vs)
+      vs
+        |> map (fun (_, e) -> free_vars e)
+        |> foldl S.union S.empty
+        |> S.union (free_vars b)
+        |> flip S.difference bound
   | Lit _ -> S.empty
-
-let rec subst m = function
-  | Ref v ->
-    match M.lookup v m with
-    | Some s -> s
-    | None -> Ref v
-  | App (f, x) -> App (subst m f, subst m x)
-  | Lam (v, x) -> Lam (v, subst (M.delete v m) x)
-  | Case (e, xs) -> Case (subst m e, map (second (subst m)) xs)
-  | Lit x -> Lit x
 
 type hstype =
   | Tycon of string
@@ -62,29 +60,3 @@ type decl =
   | Foreign of fdecl
 
 type prog <- list decl
-
-let rec xs !! i =
-  match xs, i with
-  | Cons (x, _), 0 -> x
-  | Cons (_, xs), i when i > 0 -> xs !! (i - 1)
-  | _, _ -> error "empty list and/or negative index"
-
-let ds_data (_, _, cs) =
-  let ncons = length cs
-  let alts = map (("c" ^) # show) [1..ncons]
-  let ds_con i (Constr (n, args)) =
-    let arity = length args
-    let alt = alts !! i
-    let args = map (("x" ^) # show) [1..arity]
-    Decl (n, args, foldr lam (foldl app (Ref alt) (map Ref args)) alts)
-  let rec go i = function
-    | [] -> []
-    | Cons (x, xs) -> ds_con i x :: go (i + 1) xs
-  go 0 cs
-
-let ds_prog prog =
-  let! c = prog
-  match c with
-  | Data c -> ds_data c
-  | Decl (n, args, e) -> [Decl (n, args, e)]
-  | Foreign d -> [Foreign d]

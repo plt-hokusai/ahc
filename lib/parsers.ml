@@ -224,11 +224,13 @@ and sep_end_by sep p =
 
 let chainr1 p op =
   let rec scan =
-    let! x = p
-    rest x
+    lazy (
+      let! x = p
+      rest x
+    )
   and rest x =
     ( let! f = op
-      let! y = scan
+      let! y = force scan
       pure (f x y)
     ) <|> pure x
   let _ = rest (* shut up, amc *)

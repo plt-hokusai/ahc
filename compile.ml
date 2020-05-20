@@ -98,6 +98,7 @@ let rec lambda_lift strict = function
       (v,) <$> lambda_lift false e
     let! e = lambda_lift true e
     pure (Let (vs, e))
+  | If _ -> error "if expression in lambda-lifting"
 
 let rec eta_contract = function
   | Decl (n, a, e) as dec ->
@@ -172,6 +173,8 @@ let rec compile_lazy (env : M.t string slot) = function
     f # x # (Mkap ::)
   | Lam _ ->
       error "Can not compile lambda expression, did you forget to lift?"
+  | If _ ->
+      error "Can not compile if expression, did you forget to TC?"
   | Case _ ->
       error "Case expression in lazy context"
   | Lit i -> (Push (Int i) ::)

@@ -329,6 +329,11 @@ and check dt_info level scope wanted = function
         (con, args, check dt_info level scope' wanted expr)
 
       Case (scrutinee, zip_with go_arm data patterns)
+  | If (cond, e_then, e_else) ->
+      let cond = check dt_info level scope (T_con "Bool") cond
+      let e_t = check dt_info level scope wanted e_then
+      let e_e = check dt_info level scope wanted e_else
+      Case (cond, [ ("True", [], e_t), ("False", [], e_e) ])
   | x ->
       let (x, t) = infer dt_info level scope x
       is_subtype t wanted
@@ -383,7 +388,6 @@ let dependency_graph defs =
           |> M.insert name S.empty
           |> (, define name x defs)
   let (graph, defs) = foldl go (M.empty, M.empty) defs
-  G.dot_of_graph graph |> put_line
   (G.groups_of_sccs graph, defs)
 
 let mk_lam args body = foldr (curry Lam) body args

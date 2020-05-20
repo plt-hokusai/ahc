@@ -47,7 +47,13 @@ and expr : forall 'm. monad 'm => parser_t 'm expr =
     let! _ = keyword "in"
     let! b = expr
     pure (Let (bs, b))
-  try lam <|> try case <|> try hslet <+> fexp
+  let hsif =
+    let! _ = keyword "if"
+    let! c = fexp <* keyword "then"
+    let! t = expr <* keyword "else"
+    let! e = expr
+    pure (If (c, t, e))
+  try lam <|> try case <|> try hslet <|> try hsif <+> fexp
 
 let rec ty_atom : forall 'm. monad 'm => parser_t 'm hstype =
   map Tyvar (try varid)

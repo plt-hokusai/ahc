@@ -413,12 +413,14 @@ let rec add_missing_vars scope = function
 let tc_program (prog : list decl) =
   let (plan, defs) = dependency_graph prog
   let tc_one (dt_info, val_scope, ty_scope, out) group =
+    print (length out, length (S.members group))
     let defs = [ x | with name <- S.members group, with Some x <- [M.lookup name defs] ]
     match defs with
-    | [] -> (dt_info, val_scope, ty_scope, defs)
+    | [] -> (dt_info, val_scope, ty_scope, out)
     | [Foreign (Fimport {var, ftype}) as def] ->
         let ty_scope' = add_missing_vars M.empty ftype
         let t = check_is_type (M.union ty_scope' ty_scope) ftype
+        print var
         (dt_info, M.insert var (Forall { vars = M.keys ty_scope', body = t } |> Poly) val_scope, ty_scope, def :: out)
     | Cons (Foreign (Fimport {var}), _) ->
         error @@ "Foreign definition " ^ var ^ " is part of a group.  How?"
@@ -429,14 +431,16 @@ let tc_program (prog : list decl) =
         let (bindings, scope') = infer_binding_group dt_info -1 val_scope bindings
         let decs =
           [ Decl (name, unlambda expr) | with (name, expr) <- bindings ]
-        (dt_info, M.union (map force scope') val_scope, ty_scope, decs ++ defs)
+        print name
+        (dt_info, M.union (map force scope') val_scope, ty_scope, foldr (::) decs out)
     | Cons (Data d, ds) ->
         let datas = d :: [ d | with Data d <- ds ]
         let r = infer_data_group_kind ty_scope datas
         let fix_constr (name, rhos : list tc_rho) =
+          print name
           Constr (name, replicate (length rhos) (Tycon "#"))
         let rec go dt ty (vl : M.t string (scheme tc_rho)) ds = function
-          | [] -> (dt, vl, ty, reverse ds ++ out)
+          | [] -> (dt, vl, ty, ds)
           | Cons ((name, kind, constrs, info : list dt_info), rest) ->
               go
                 (foldl (fun i {name} -> M.insert name info i) dt info)
@@ -447,6 +451,6 @@ let tc_program (prog : list decl) =
                   vl info)
                 (Data (name, [], fix_constr <$> constrs) :: ds)
                 rest
-        go dt_info ty_scope val_scope [] r
+        go dt_info ty_scope val_scope out r
   let (_, _, _, p) = foldl tc_one (M.empty, M.empty, M.empty, []) plan
   p

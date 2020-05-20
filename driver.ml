@@ -19,6 +19,7 @@ let go infile outfile =
     match lex prog str with
     | Right (ds, _) ->
       ds
+        |> T.tc_program
         |> C.program
         |> A.assm_program
         |> write_bytes outfile

@@ -213,24 +213,28 @@ let program decs =
   let (decs, (_, lams, _)) =
     run_state (traverse (lambda_lift_sc # eta_contract) decs)
       (0, [], S.empty)
-  let define nm =
+
+  let define nm k =
     let! x = get
     if nm `S.member` x then
-      error @@ "Redefinition of value " ^ nm
+      pure []
     else
-      modify (S.insert nm)
+      let! _ = modify (S.insert nm)
+      k
 
   let go =
     flip traverse (lams ++ decs) @@ function
       | Decl ((nm, args, _) as sc) ->
-        let! _ = define nm
-        let code = supercomb sc
-        [Sc (nm, length args, code)] |> pure
+        define nm (
+          let code = supercomb sc
+          [Sc (nm, length args, code)] |> pure
+        )
       | Data (_, _, cs) -> pure (compile_cons cs)
       | Foreign (Fimport { cc = Prim, var } as fi) ->
-        let! _ = define var
-        let (code, _) = cg_prim fi
-        pure [code]
+        define var (
+          let (code, _) = cg_prim fi
+          pure [code]
+        )
       | Foreign f -> pure [Fd f]
   let (out, _) = run_state go S.empty
   join out

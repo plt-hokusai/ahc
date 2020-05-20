@@ -60,7 +60,10 @@ and ty_fexp : forall 'm. monad 'm => parser_t 'm hstype =
 and ty_exp : forall 'm. monad 'm => parser_t 'm hstype =
   chainr1 ty_fexp (map (const (curry Tyarr)) arrow)
 and ty_tup : forall 'm. monad 'm => parser_t 'm hstype =
-  Tytup <$> sep_by comma ty_exp
+  let tytup = function
+    | [x] -> x
+    | x -> Tytup x
+  tytup <$> sep_by comma ty_exp
 
 let datadec : forall 'm. monad 'm => parser_t 'm decl =
   let! _ = try (keyword "data")
@@ -70,9 +73,11 @@ let datadec : forall 'm. monad 'm => parser_t 'm decl =
     pure (Constr (nm, args))
   let! nm = conid
   let! args = many (try varid)
-  let! _ = equals
-  let! c = sep_by_1 pipe (try datacon)
-  pure (Data (nm, args, c))
+  let! cs = optionally (
+    let! _ = equals
+    sep_by_1 pipe (try datacon)
+  )
+  pure (Data (nm, args, match cs with | Some cs -> cs | None -> []))
 
 let fdecl : forall 'm. monad 'm => parser_t 'm fdecl =
   let! _ = try (keyword "import")

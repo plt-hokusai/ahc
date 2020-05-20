@@ -38,6 +38,13 @@ type hstype =
   | Tyarr of hstype * hstype
   | Tytup of list hstype
 
+let rec free_cons = function
+  | Tycon v -> S.singleton v
+  | Tyvar _ -> S.empty
+  | Tyapp (f, x) -> S.union (free_cons f) (free_cons x)
+  | Tyarr (f, x) -> S.union (free_cons f) (free_cons x)
+  | Tytup xs -> foldl (fun s x -> S.union s (free_cons x)) S.empty xs
+
 let rec arity = function
   | Tyarr (_, i) -> 1 + arity i
   | _ -> 0

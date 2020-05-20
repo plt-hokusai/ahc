@@ -1,5 +1,6 @@
 module C = import "./compile.ml"
 module A = import "./assemble.ml"
+module T = import "./tc.ml"
 open import "./parser.ml"
 open import "prelude.ml"
 open import "lua/io.ml"
@@ -33,7 +34,7 @@ let go' infile outfile =
 let test str =
   match lex prog str with
   | Right (ds, _) ->
-      let code = ds |> C.program
+      let code = ds |> T.tc_program |> C.program
       let lua = code |> A.assm_program
       print code
       put_line lua

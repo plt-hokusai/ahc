@@ -7,6 +7,7 @@ type expr =
   | App  of expr * expr
   | Lam  of string * expr
   | Case of expr * list (string * list string * expr)
+  | If   of expr * expr * expr
   | Lit  of int
   | Let  of list (string * expr) * expr
 
@@ -29,6 +30,8 @@ let rec free_vars = function
         |> foldl S.union S.empty
         |> S.union (free_vars b)
         |> flip S.difference bound
+  | If (f, x, y) ->
+      S.union (free_vars f) (S.union (free_vars x) (free_vars y))
   | Lit _ -> S.empty
 
 type hstype =

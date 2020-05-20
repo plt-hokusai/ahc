@@ -194,12 +194,23 @@ and compile_strict (env : M.t string slot) = function
   | App (App (Ref f, x), y) as e ->
       match M.lookup f !prim_scs with
       | Some op when is_arith_op op ->
-          print ("compiling", f, "specially")
           compile_strict env x
             # compile_strict (incr <$> env) y
             # (op ::)
       | _ -> compile_lazy env e # (Eval ::)
   | e -> compile_lazy env e # (Eval ::)
+
+and compile_tail (env : M.t string slot) = function
+  | Ref v ->
+    match M.lookup v env with
+    | Some (As i) -> (Push (Arg i) ::)
+    | Some (Ls i) -> (Push (Local i) ::)
+    | None -> (Push (Combinator v) ::)
+  | App (f, x) ->
+    let f = compile_tail env f
+    let x = compile_lazy (map incr env) x
+    f # x # (Mkap ::)
+  | e -> compile_strict env e
 
 and compile_let cont env vs e =
   let n = length vs
@@ -218,7 +229,7 @@ and compile_let cont env vs e =
 
 let supercomb (_, args, exp) =
   let env = M.from_list (zip args [0..length args])
-  let k = compile_strict (M.from_list (zip args (As <$> [0..length args]))) exp
+  let k = compile_tail (M.from_list (zip args (As <$> [0..length args]))) exp
   k [Update (length env), Pop (length env), Unwind]
 
 let compile_cons =
@@ -267,7 +278,6 @@ let program decs =
       | Foreign (Fimport { cc = Prim, var } as fi) ->
         define var (
           let (code, h) = cg_prim fi
-          print h
           prim_scs := M.insert var h !prim_scs
           pure [code]
         )

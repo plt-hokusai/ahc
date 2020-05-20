@@ -19,7 +19,8 @@ let go infile outfile =
     match lex prog str with
     | Right (ds, _) ->
       ds
-        |> T.tc_program
+        |> T.tc_program [] []
+        |> fun (_, _, z) -> z
         |> C.program
         |> A.assm_program
         |> write_bytes outfile
@@ -35,7 +36,11 @@ let go' infile outfile =
 let test str =
   match lex prog str with
   | Right (ds, _) ->
-      let code = ds |> T.tc_program |> C.program
+      let code =
+        ds
+          |> T.tc_program [] []
+          |> fun (_, _, z) -> z
+          |> C.program
       let lua = code |> A.assm_program
       print code
       put_line lua

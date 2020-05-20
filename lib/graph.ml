@@ -61,6 +61,13 @@ let toposort (graph : t 'a) : list 'a =
   iter visit nodes
   reverse !l
 
+let dot_of_graph (graph : t 'a) =
+  let mk node =
+    S.foldr (fun edge r -> show node ^ " -> " ^ show edge ^ "\n" ^ r) "\n"
+  "strict digraph {"
+    ^ M.foldr_with_key (fun node edges r -> mk node edges ^ r) "" graph
+    ^ "}"
+
 let groups_of_sccs (graph : t 'a) =
   let sccs = sccs graph
   let edges_of n =
@@ -72,10 +79,12 @@ let groups_of_sccs (graph : t 'a) =
       |> M.assocs
       |> map (fun (k, s) -> M.singleton s (S.singleton k))
       |> foldl (M.union_by (fun _ -> S.union)) M.empty
+  let atd nodes =
+    S.foldr (fun n -> S.union (edges_of n)) S.empty nodes `S.difference` nodes
   let comp_deps =
      components
        |> M.assocs
-       |> map (fun (node, edges) -> (node, edges_of node `S.difference` edges))
+       |> map (fun (node, edges) -> (node, atd edges))
        |> M.from_list
   let ordering = toposort comp_deps
   [ x | with k <- ordering, with Some x <- [M.lookup k components] ]

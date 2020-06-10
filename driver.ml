@@ -5,6 +5,9 @@ open import "./parser.ml"
 open import "prelude.ml"
 open import "lua/io.ml"
 
+module Stg = import "./stg/lower.ml"
+module Out = import "./stg/output.ml"
+
 external val dofile : string -> () = "dofile"
 
 let printerror (e, { line, col }) =
@@ -53,6 +56,35 @@ let test_file infile =
   | None -> ()
   close_file infile
 
+let rec take n xs =
+  match n, xs with
+  | _, [] -> []
+  | 0, _ -> []
+  | n, Cons (x, xs) -> Cons (x, take (n - 1) xs)
+
+let go_stg infile outfile =
+  let infile = open_for_reading infile
+  let outfile = open_file outfile Write_m
+  match read_all infile with
+  | Some str -> 
+    match lex prog str with
+    | Right (ds, _) ->
+      let decs =
+        ds |> T.tc_program [] []
+          |> fun (_, _, z) -> z
+          |> flip (>>=) Stg.lower_dec
+      let (_, sts, locals) = foldl Out.stmts_of_def (M.empty, [], []) decs
+      write_bytes outfile "local Constr_mt = { __call = function(x) return x end }\n"
+      Out.get_file_contents () |> (^"\n") |> write_bytes outfile
+      write_bytes outfile (Out.mk_pap_def ^ "\n")
+      write_bytes outfile (Out.ppr_stmt "" (Out.Local (take 100 locals, [])) ^ "\n")
+      iter (write_bytes outfile # (^"\n") # Out.ppr_stmt "") sts
+      write_bytes outfile "main_entry(function() return 'the real world is fake' end)\n"
+    | Left e ->
+      printerror e
+  | None -> ()
+  close_file infile
+  close_file outfile
 
 external val args : string * string =
   "{ _1 = select(1, ...), _2 = select(2, ...) }"

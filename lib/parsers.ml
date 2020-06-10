@@ -234,7 +234,7 @@ let chainr1 p op =
       pure (f x y)
     ) <|> pure x
   let _ = rest (* shut up, amc *)
-  scan
+  force scan
 
 let parse (P x) s =
   let! x = x { line = 0, col = 0 } s
@@ -254,5 +254,5 @@ let lift m = P @@ fun pos s ->
   let! x = m
   pure @@ Ok (E, x, s, pos)
 
-let morph (k : forall 'a. 'm 'a -> 'n 'a) (P x) = P @@ fun s -> k (x s)
+let morph (k : forall 'a. 'm 'a -> 'n 'a) (P x) = P @@ fun p s -> k (x p s)
 let void x = map (const ()) x

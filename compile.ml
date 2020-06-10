@@ -89,8 +89,8 @@ let rec lambda_lift strict = function
           |> free_vars
           |> flip S.difference known_sc
           |> S.members
-      let def = ("Lam" ^ show i, vars, case)
-      let app = foldl (fun f -> app f # Ref) (Ref ("Lam" ^ show i)) vars
+      let def = ("Case" ^ show i, vars, case)
+      let app = foldl (fun f -> app f # Ref) (Ref ("Case" ^ show i)) vars
       put (i + 1, Decl def :: defs, known_sc)
         |> map (const app)
   | Let (vs, e) ->

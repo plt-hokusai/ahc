@@ -425,7 +425,11 @@ let tc_program value_exports type_exports (prog : list decl) =
     | [Foreign (Fimport {var, ftype}) as def] ->
         let ty_scope' = add_missing_vars M.empty ftype
         let t = check_is_type (M.union ty_scope' ty_scope) ftype
-        (dt_info, M.insert var (Forall { vars = M.keys ty_scope', body = t } |> Poly) val_scope, ty_scope, def :: out)
+        (
+          dt_info,
+          M.insert var (Forall { vars = M.keys ty_scope', body = t } |> Poly) val_scope,
+          ty_scope, def :: out
+        )
     | Cons (Foreign (Fimport {var}), _) ->
         error @@ "Foreign definition " ^ var ^ " is part of a group.  How?"
     | Cons (Decl (name, args, body), ds) ->

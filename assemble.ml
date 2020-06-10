@@ -96,6 +96,8 @@ let sc2lua (name, arity, body) =
     name ^ "_combinator = { F, " ^ name ^ ", " ^ show arity ^ ", " ^ show name ^ " };"
   body ^ "\n" ^ dec
 
+let private pasted_files : ref (S.t string) = ref S.empty
+
 let foreign2lua (Fimport { cc, fent = fspec, var, ftype }) =
   let (file, fspec) =
     match Strings.split_on " " fspec with
@@ -123,12 +125,16 @@ let foreign2lua (Fimport { cc, fent = fspec, var, ftype }) =
     let contents =
       match file with
       | Some path -> 
-        let f = open_for_reading path
-        let x = read_all f
-        close_file f
-        match x with
-        | Some s -> "--- " ^ path ^ "\n" ^ s ^ "\n"
-        | None -> ""
+          if path `S.member` !pasted_files then
+            ""
+          else
+            pasted_files := S.insert path !pasted_files
+            let f = open_for_reading path
+            let x = read_all f
+            close_file f
+            match x with
+            | Some s -> "--- " ^ path ^ "\n" ^ s ^ "\n"
+            | None -> ""
       | None -> ""
     contents ^ wrapper ^ "\n" ^ dec
 
@@ -153,4 +159,4 @@ let assm_program decs =
     let local_decs =
       foldl (fun x v -> x ^ ", " ^ v) ("local " ^ local1) locals
     let body = foldl (fun x s -> x ^ codegen s ^ "\n") "" decs
-    preamble ^ local_decs ^ "\n" ^ body ^ "unwind({{ A, main_combinator, 123 }}, 1)"
+    preamble ^ local_decs ^ "\n" ^ body ^ "unwind({main_combinator}, 1)"
